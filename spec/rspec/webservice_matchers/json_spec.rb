@@ -11,7 +11,7 @@ describe 'json schema validation' do
     url    = 'http://www.website.com/'
 
     expect {
-      expect(url).to validate_against_json_schema(schema)
+      expect(url).to validate_against(schema)
     }.to raise_exception RSpec::WebserviceMatchers::JsonSchemaUnreadable
   end
 

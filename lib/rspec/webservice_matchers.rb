@@ -14,7 +14,7 @@ module RSpec
     class JsonSchemaUnreadable < StandardError; end
 
     # Pass when the given schema can validate the given resource
-    RSpec::Matchers.define :validate_against_json_schema do |schema|
+    RSpec::Matchers.define :validate_against do |schema|
       match do |url|
         raise JsonSchemaUnreadable
       end
