@@ -13,7 +13,7 @@ module RSpec
   module WebserviceMatchers
     class JsonSchemaUnreadable < StandardError; end
 
-    # Pass when 
+    # Pass when the given schema can validate the given resource
     RSpec::Matchers.define :validate_against_json_schema do |schema|
       match do |url|
         raise JsonSchemaUnreadable
