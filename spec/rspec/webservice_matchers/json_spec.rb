@@ -8,7 +8,7 @@ describe 'json schema validation' do
 
   it 'fails if schema data is not readable' do
     schema = missing_schema
-    url    = 'http://www.website.com'
+    url    = 'http://www.website.com/'
 
     expect {
       expect(url).to validate_against_json_schema(schema)
