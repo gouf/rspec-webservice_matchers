@@ -11,6 +11,15 @@ module RSpec
   # RSpec Custom Matchers
   # See https://www.relishapp.com/rspec/rspec-expectations/v/2-3/docs/custom-matchers/define-matcher
   module WebserviceMatchers
+    class JsonSchemaUnreadable < StandardError; end
+
+    # Pass when 
+    RSpec::Matchers.define :validate_against_json_schema do |schema|
+      match do |url|
+        raise JsonSchemaUnreadable
+      end
+    end
+
     # Test whether https is correctly implemented
     RSpec::Matchers.define :have_a_valid_cert do
       error_message = nil

@@ -2,14 +2,16 @@ require 'spec_helper'
 require 'rspec/webservice_matchers'
 
 describe 'json schema validation' do
-  let(:valid_resource) { 'https://www.eff.org/' }
   let(:missing_schema) { nil }
   let(:invalid_schema) { 'Definitely not a valid schema' }
   # let (:valid_schema) {  }
 
-  it 'fails if schema data not readable' do
+  it 'fails if schema data is not readable' do
+    schema = missing_schema
+    url    = 'http://www.website.com'
+
     expect {
-      valid_resource.should be_valid_json(missing_schema)
+      expect(url).to validate_against_json_schema(schema)
     }.to raise_exception RSpec::WebserviceMatchers::JsonSchemaUnreadable
   end
 
