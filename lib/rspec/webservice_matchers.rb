@@ -33,16 +33,22 @@ module RSpec
 
     # Pass successfully if we get a 301 to the place we intend.
     RSpec::Matchers.define :redirect_permanently_to do |expected|
-      error_message = actual_status = actual_location = nil
+      state = {}
+      error_message   = nil
+      actual_status   = nil
+      actual_location = nil
 
       match do |url_or_domain_name|
         begin
-          response = WebserviceMatchers.recheck_on_timeout { WebserviceMatchers.connection.head(WebserviceMatchers.make_url url_or_domain_name) }
+          response = WebserviceMatchers.make_response(url_or_domain_name)
           expected = WebserviceMatchers.make_url(expected)
           actual_location = response.headers['location']
           actual_status   = response.status
 
-          (actual_status == 301) && (/#{expected}\/?/.match(actual_location))
+          regex = /#{expected}\/?/
+          expected_status   = actual_status.eql?(301)
+          expected_location = regex.match(actual_location)
+          expected_status && expected_location
         rescue Exception => e
           error_message = e.message
           false
@@ -57,12 +63,10 @@ module RSpec
           if [302, 307].include? actual_status
             mesgs << "received a temporary redirect, status #{actual_status}"
           end
-          if !actual_location.nil? && ! (%r|#{expected}/?| === actual_location)
+          unless actual_location.nil? && (/#{expected}\/?/.eql? actual_location)
             mesgs << "received location #{actual_location}"
           end
-          if ![301, 302, 307].include? actual_status
-            mesgs << "not a redirect: received status #{actual_status}"
-          end
+          mesgs << WebserviceMatchers.redirected?
           mesgs.join('; ').capitalize
         end
       end
@@ -71,7 +75,9 @@ module RSpec
     # Pass successfully if we get a 302 or 307 to the place we intend.
     RSpec::Matchers.define :redirect_temporarily_to do |expected|
       include RSpec
-      error_message = actual_status = actual_location = nil
+      error_message = nil
+      actual_status = nil
+      actual_location = nil
 
       match do |url_or_domain_name|
         begin
@@ -92,15 +98,10 @@ module RSpec
           error_message
         else
           mesgs = []
-          if actual_status == 301
-            mesgs << "received a permanent redirect, status #{actual_status}"
-          end
-          if !actual_location.nil? && ! (%r|#{expected}/?| === actual_location)
-            mesgs << "received location #{actual_location}"
-          end
-          if ![301, 302, 307].include? actual_status
-            mesgs << "not a redirect: received status #{actual_status}"
-          end
+          webm = WebserviceMatchers
+          mesgs << webm.received_permanent_redirect(actual_status)
+          mesgs << webm.received_location(expected, actual_location)
+          mesgs << webm.redirected(actual_status)
           mesgs.join('; ').capitalize
         end
       end
@@ -111,19 +112,22 @@ module RSpec
     # 2. to an https url
     # 3. which is correctly configured
     RSpec::Matchers.define :enforce_https_everywhere do
-      error_msg = actual_status = actual_protocol = actual_valid_cert = nil
+      error_msg         = nil
+      actual_status     = nil
+      actual_protocol   = nil
+      actual_valid_cert = nil
 
       match do |domain_name|
         begin
-          response = WebserviceMatchers.recheck_on_timeout { WebserviceMatchers.connection.head("http://#{domain_name}") }
+          webm = WebserviceMatchers
+          response = webm.make_response("http://#{domain_name}")
           new_url  = response.headers['location']
           actual_status  = response.status
           /^(?<protocol>https?)/ =~ new_url
-          actual_protocol = protocol || nil
-          actual_valid_cert = WebserviceMatchers.valid_ssl_cert?(new_url)
-          (actual_status == 301) &&
-            (actual_protocol == 'https') &&
-            (actual_valid_cert == true)
+          actual_protocol = protocol unless protocol.nil?
+          actual_valid_cert = webm.valid_ssl_cert?(new_url)
+          args = [actual_status, actual_protocol, actual_valid_cert]
+          redirected_on_valid_ssl?(args)
         rescue Faraday::Error::ConnectionFailed
           error_msg = 'Connection failed'
           false
@@ -133,23 +137,17 @@ module RSpec
       # Create a compound error message listing all of the
       # relevant actual values received.
       failure_message_for_should do
-        if !error_msg.nil?
-          error_msg
-        else
+        if error_msg.nil?
           mesgs = []
-          if actual_status != 301
-            mesgs << "received status #{actual_status} instead of 301"
-          end
-          if !actual_protocol.nil? && actual_protocol != 'https'
-            mesgs << "destination uses protocol #{actual_protocol.upcase}"
-          end
-          if !actual_valid_cert
-            mesgs << "there's no valid SSL certificate"
-          end
+          webm = WebserviceMatchers
+          mesgs << webm.received_permanent_redirect(actual_status)
+          mesgs << webm.destination_protocol(actual_protocol)
+          mesgs << "there's no valid SSL certificate" unless actual_valid_cert
           mesgs.join('; ').capitalize
+        else
+          error_msg
         end
       end
-
     end
 
     # Pass when a URL returns the expected status code
@@ -159,10 +157,11 @@ module RSpec
 
       match do |url_or_domain_name|
         url           = WebserviceMatchers.make_url(url_or_domain_name)
-        response      = WebserviceMatchers.recheck_on_timeout { WebserviceMatchers.connection.head(url) }
+        response      = WebserviceMatchers.make_response(url)
         actual_code   = response.status
         expected_code = expected_code.to_i
-        actual_code   == expected_code
+
+        actual_code == expected_code
       end
 
       failure_message_for_should do
@@ -206,7 +205,8 @@ module RSpec
     end
 
     def self.try_ssl_connection(domain_name_or_url)
-      recheck_on_timeout { connection.head("https://#{remove_protocol(domain_name_or_url)}") }
+      url = "https://#{remove_protocol(domain_name_or_url)}"
+      recheck_on_timeout { connection.head(url) }
     end
 
 
@@ -238,11 +238,47 @@ module RSpec
     end
 
     def self.recheck_on_timeout
-      begin
-        yield
-      rescue Faraday::Error::TimeoutError
-        yield
+      yield
+    rescue Faraday::Error::TimeoutError
+      yield
+    end
+
+    def self.make_response(url_or_domain_name)
+      connection = lambda do
+        webm = WebserviceMatchers
+        url = webm.make_url(url_or_domain_name)
+        webm.connection.head(url)
       end
+      webm.recheck_on_timeout { connection.call }
+    end
+
+    def self.redirected(actual_status)
+      message = "not a redirect: received status #{actual_status}"
+      [301, 302, 307].include?(actual_status) ? '' : message
+    end
+
+    def self.received_location(expected, actual_location)
+      message = "received location #{actual_location}"
+      condition = actual_location.nil? && (/#{expected}\/?/ == actual_location)
+      condition ? '' : message
+    end
+
+    def self.received_permanent_redirect(actual_status)
+      message = "received a permanent redirect, status #{actual_status}"
+      (actual_status == 301) ? message : ''
+    end
+
+    def self.destination_protocol(actual_protocol)
+      return '' if actual_protocol.nil?
+      message = "destination uses protocol #{actual_protocol.upcase}"
+      actual_protocol == 'https' ? message : ''
+    end
+
+    def self.redirected_on_valid_ssl?(args)
+      actual_status, actual_protocol, actual_valid_cert = args
+      (actual_status == 301) &&
+        (actual_protocol == 'https') &&
+        (actual_valid_cert == true)
     end
   end
 end
